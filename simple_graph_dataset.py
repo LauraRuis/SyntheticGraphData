@@ -1091,33 +1091,44 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    dataset = SimpleGraphDataset(
-        num_graphs=args.num_graphs,
-        num_entities=args.num_entities,
-        edge_prob=args.edge_prob,
-        node_or_prob=args.node_or_prob,
-        num_worlds=args.num_worlds,
-        sample_ratio_from_worlds=args.sample_ratio_from_worlds,
-        root_prior=args.root_prior,
-        max_obs_size=args.max_obs_size,
-        num_observation_templates=args.num_observation_templates,
-        num_explanation_templates=args.num_explanation_templates,
-        max_observations=args.max_observations,
-        max_explanations=args.max_explanations,
-        num_copies_explanations=args.num_copies_explanations,
-        add_instruction_datapoints=args.add_instruction_datapoints,
-        val_ratio=args.val_ratio,
-        test_ratio=args.test_ratio,
-        heldout_scope=args.heldout_scope,
-        seed=args.seed,
-    )
-    dataset.generate()
-    dataset.write_jsonl(args.output_dir)
+    
+    # Have alternate trials
+    for trial in range(20):
 
-    if args.visualize:
-        dataset.plot_graphs(args.output_dir / "graphs.png")
+        # Create an instance of a directory
+        trial_output_dir = args.output_dir / ("trial_" + str(trial)) 
+        trial_output_dir.mkdir(parents = True, exist_ok = True)
 
-    print_breakdowns_and_examples(dataset.examples, args.output_dir)
+        dataset = SimpleGraphDataset(
+            num_graphs=args.num_graphs,
+            num_entities=args.num_entities,
+            edge_prob=args.edge_prob,
+            node_or_prob=args.node_or_prob,
+            num_worlds=args.num_worlds,
+            sample_ratio_from_worlds=args.sample_ratio_from_worlds,
+            root_prior=args.root_prior,
+            max_obs_size=args.max_obs_size,
+            num_observation_templates=args.num_observation_templates,
+            num_explanation_templates=args.num_explanation_templates,
+            max_observations=args.max_observations,
+            max_explanations=args.max_explanations,
+            num_copies_explanations=args.num_copies_explanations,
+            add_instruction_datapoints=args.add_instruction_datapoints,
+            val_ratio=args.val_ratio,
+            test_ratio=args.test_ratio,
+            heldout_scope=args.heldout_scope,
+
+            # Incrementing from a random seed for reproducibility
+            seed = args.seed + trial,
+        )
+        
+        dataset.generate()
+        dataset.write_jsonl(trial_output_dir)
+
+        if args.visualize:
+            dataset.plot_graphs(trial_output_dir / "graphs.png")
+
+        print_breakdowns_and_examples(dataset.examples, trial_output_dir)
 
 
 if __name__ == "__main__":
