@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Test Data
+test_grid/
+simple_graph_data/
+*.pk1
+*.pt

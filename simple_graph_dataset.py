@@ -1091,44 +1091,51 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    
-    # Have alternate trials
-    for trial in range(20):
 
-        # Create an instance of a directory
-        trial_output_dir = args.output_dir / ("trial_" + str(trial)) 
-        trial_output_dir.mkdir(parents = True, exist_ok = True)
+    GRAPH_COUNTS  = [1, 2, 4, 8, 16]
+    ENTITY_COUNTS = [5, 10, 15, 20, 25]
+    EDGE_PROBS    = [0.1, 0.2, 0.4]
 
-        dataset = SimpleGraphDataset(
-            num_graphs=args.num_graphs,
-            num_entities=args.num_entities,
-            edge_prob=args.edge_prob,
-            node_or_prob=args.node_or_prob,
-            num_worlds=args.num_worlds,
-            sample_ratio_from_worlds=args.sample_ratio_from_worlds,
-            root_prior=args.root_prior,
-            max_obs_size=args.max_obs_size,
-            num_observation_templates=args.num_observation_templates,
-            num_explanation_templates=args.num_explanation_templates,
-            max_observations=args.max_observations,
-            max_explanations=args.max_explanations,
-            num_copies_explanations=args.num_copies_explanations,
-            add_instruction_datapoints=args.add_instruction_datapoints,
-            val_ratio=args.val_ratio,
-            test_ratio=args.test_ratio,
-            heldout_scope=args.heldout_scope,
+    total = len(GRAPH_COUNTS) * len(ENTITY_COUNTS) * len(EDGE_PROBS)
+    run = 0
+    for edge_prob in EDGE_PROBS:
+        for num_graphs in GRAPH_COUNTS:
+            for num_entities in ENTITY_COUNTS:
+                run += 1
+                cell_dir = args.output_dir / (
+                    f"graphs{num_graphs}_entities{num_entities}"
+                    f"_edgeprob{int(edge_prob * 100):02d}"
+                )
+                print(f"\n[{run}/{total}] graphs={num_graphs} entities={num_entities} edge_prob={edge_prob}")
 
-            # Incrementing from a random seed for reproducibility
-            seed = args.seed + trial,
-        )
-        
-        dataset.generate()
-        dataset.write_jsonl(trial_output_dir)
+                dataset = SimpleGraphDataset(
+                    num_graphs=num_graphs,
+                    num_entities=num_entities,
+                    edge_prob=edge_prob,
+                    node_or_prob=args.node_or_prob,
+                    num_worlds=args.num_worlds,
+                    sample_ratio_from_worlds=args.sample_ratio_from_worlds,
+                    root_prior=args.root_prior,
+                    max_obs_size=args.max_obs_size,
+                    num_observation_templates=args.num_observation_templates,
+                    num_explanation_templates=args.num_explanation_templates,
+                    max_observations=args.max_observations,
+                    max_explanations=args.max_explanations,
+                    num_copies_explanations=args.num_copies_explanations,
+                    add_instruction_datapoints=args.add_instruction_datapoints,
+                    val_ratio=args.val_ratio,
+                    test_ratio=args.test_ratio,
+                    heldout_scope=args.heldout_scope,
+                    seed=args.seed,
+                )
 
-        if args.visualize:
-            dataset.plot_graphs(trial_output_dir / "graphs.png")
+                dataset.generate()
+                dataset.write_jsonl(cell_dir)
 
-        print_breakdowns_and_examples(dataset.examples, trial_output_dir)
+                if args.visualize:
+                    dataset.plot_graphs(cell_dir / "graphs.png")
+
+                print_breakdowns_and_examples(dataset.examples, cell_dir)
 
 
 if __name__ == "__main__":
