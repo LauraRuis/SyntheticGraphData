@@ -7,7 +7,7 @@ wandb:
 
 seed: 1
 model_pars:
-  model_dir: "exp/Qwen/Qwen3-4B-Instruct-2507/prime-valley-1809/checkpoint-18201"
+  model_dir: ???
   hf_model_id: "Qwen/Qwen3-4B-Instruct-2507"
   hf_tokenizer_id: "Qwen/Qwen3-4B-Instruct-2507"
 
