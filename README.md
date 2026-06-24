@@ -58,6 +58,6 @@ Or submit a job to slurm (see train.sh)
 
 To run eval:
 ```
-python evaluate.py +experiment=evaluate ++wandb.entity=<your_wandb_org>
+python evaluate.py +experiment=evaluate
 ```
 Or submit a job to slurm (see eval.sh)
