@@ -1,3 +1,8 @@
+.hydra/
+.vscode/
+*.sh
+wandb/
+exp/
 simple_graph_data/
 graph_synth_data/
 # Byte-compiled / optimized / DLL files
