@@ -43,11 +43,11 @@ Make sure you're still on the GPU node
 We need a separate env because we need the package VLLM for evaluation, which has strict dependencies that don't play nicely with the training env above.
 
 ```bash
-uv venv eval_env --python 3.12
+uv venv eval_env --python 3.10
 source eval_env/bin/activate
 uv pip install torch --index-url https://download.pytorch.org/whl/cu129
 uv pip install transformers[torch] hydra-core datasets
-uv pip install vllm --extra-index-url https://download.pytorch.org/whl/cu129
+uv pip install "vllm>=0.9.0" --extra-index-url https://download.pytorch.org/whl/cu129
 ```
 
 To run training:

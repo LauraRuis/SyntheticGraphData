@@ -7,7 +7,7 @@ wandb:
 
 seed: 1
 model_pars:
-  model_dir: ???
+  model_dir: "exp/Qwen/Qwen3-4B-Instruct-2507/polar-bee-16/checkpoint-70323"
   hf_model_id: "Qwen/Qwen3-4B-Instruct-2507"
   hf_tokenizer_id: "Qwen/Qwen3-4B-Instruct-2507"
 
@@ -31,5 +31,4 @@ eval_pars:
   batch_size: 32
   tensor_parallel_size: 1
   pipeline_parallel_size: 1
-  data_parallel_size: 1
   gpu_memory_utilization: 0.9

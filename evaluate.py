@@ -124,34 +124,24 @@ def _make_json_serializable(obj):
 
 class LLMInference:
     def __init__(self, num_datapoints, tokenizer, vocab_size: int, model_name_or_path="meta-llama/Llama-3.1-8B-Instruct", 
-                 max_tokens=1024, n=16, temperature=0.8, lora_path=None, logging_interval=100, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1):
+                 max_tokens=1024, n=16, temperature=0.8, logging_interval=100, tensor_parallel_size=1, pipeline_parallel_size=1):
         # NOTE: forcing TRITON_ATTN avoids vllm's bundled FlashAttention-3 .so,
         # which is built against a CUDA toolkit too new for the current driver
         # (575.x) on this cluster. Triton kernels are JIT-compiled at runtime
         # against the local CUDA, so they're driver-version-tolerant.
         # max_num_seqs lowered from vllm's default of 1024 to fit within the
         # Mamba/SSM cache block budget on hybrid architectures like Qwen3.6.
-        self.llm = LLM(model=model_name_or_path, enable_lora=lora_path != None,
-                       tensor_parallel_size=tensor_parallel_size, pipeline_parallel_size=pipeline_parallel_size, data_parallel_size=data_parallel_size,
-                       max_logprobs=100,
-                       attention_backend="TRITON_ATTN",
-                       mm_encoder_attn_backend="TRITON_ATTN",
+        self.llm = LLM(model=model_name_or_path,
+                       tensor_parallel_size=tensor_parallel_size, pipeline_parallel_size=pipeline_parallel_size,
                        max_num_seqs=256)
         self.tokenizer = tokenizer
-        self.lora_path = lora_path
         self.sampling_params = SamplingParams(max_tokens=max_tokens, n=n, temperature=temperature, logprobs=100)
         self._logging_counter = 0
         self.logging_interval = logging_interval
         self.num_datapoints = num_datapoints
 
     def __call__(self, batch: Dict[str, torch.LongTensor]) -> Dict[str, list]:
-        if self.lora_path:
-            outputs = self.llm.generate(
-                batch["prompt"], 
-                self.sampling_params,
-            )
-        else:
-            outputs = self.llm.generate(batch["prompt"], self.sampling_params)
+        outputs = self.llm.generate(batch["prompt"], self.sampling_params)
         # One per input in the batch
         prompt: List[str] = []
         # Multiple per input in the batch (num_samples)
@@ -414,7 +404,6 @@ def main(args):
             logging_interval=args.eval_pars.logging_interval,
             tensor_parallel_size=args.eval_pars.tensor_parallel_size,
             pipeline_parallel_size=args.eval_pars.pipeline_parallel_size,
-            data_parallel_size=args.eval_pars.data_parallel_size,
         )
         model_max_len = _infer_vllm_max_model_len(llm_fn, tokenizer)
         if model_max_len is not None:

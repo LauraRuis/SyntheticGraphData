@@ -75,7 +75,6 @@ eval_pars:
   logging_interval: 100
   tensor_parallel_size: 1
   pipeline_parallel_size: 1
-  data_parallel_size: 1
   gpu_memory_utilization: 0.92
   use_train_icl: false
   icl_include_instruct: false
