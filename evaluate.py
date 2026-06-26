@@ -135,7 +135,7 @@ class LLMInference:
                        tensor_parallel_size=tensor_parallel_size, pipeline_parallel_size=pipeline_parallel_size,
                        max_num_seqs=256)
         self.tokenizer = tokenizer
-        self.sampling_params = SamplingParams(max_tokens=max_tokens, n=n, temperature=temperature, logprobs=100)
+        self.sampling_params = SamplingParams(max_tokens=max_tokens, n=n, temperature=temperature, logprobs=20)
         self._logging_counter = 0
         self.logging_interval = logging_interval
         self.num_datapoints = num_datapoints
