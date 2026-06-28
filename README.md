@@ -56,6 +56,15 @@ python train.py +experiment=sft ++wandb.entity=<your_wandb_org>
 ```
 Or submit a job to slurm (see train.sh)
 
+If you're getting a device busy error:
+```bash
+RuntimeError: CUDA error: CUDA-capable device(s) is/are busy or unavailable
+```
+Run with a visible device that is free, for example if gpu 6 is free:
+```bash
+CUDA_VISIBLE_DEVICES=6 python train.py +experiment=sft ++wandb.entity=<your_wandb_org>
+```
+
 To run eval:
 ```
 python evaluate.py +experiment=evaluate
