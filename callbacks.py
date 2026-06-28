@@ -122,7 +122,7 @@ class SanityManualGreedyOnce(TrainerCallback):
 
         model = trainer.model
         device = getattr(trainer.accelerator, "device", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-
+        device = next(trainer.model.parameters()).device
         enc = self.tok(self.prompt, return_tensors="pt")
         input_ids = enc["input_ids"].to(device)
         attn = enc.get("attention_mask")
