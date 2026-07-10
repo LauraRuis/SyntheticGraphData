@@ -70,3 +70,28 @@ To run eval:
 python evaluate.py +experiment=evaluate
 ```
 Or submit a job to slurm (see eval.sh)
+
+To compare one or two checkpoints interactively:
+```bash
+python interactive_prompt.py exp/Qwen/Qwen3-4B-Instruct-2507/polar-bee-16/checkpoint-70323
+
+python interactive_prompt.py \
+  --checkpoint-dir exp/Qwen/Qwen3-4B-Instruct-2507/polar-bee-16 \
+  --checkpoint checkpoint-60000 \
+  --checkpoint checkpoint-70323 \
+  --label old \
+  --label new \
+  --temperature 0.1 \
+  --max-tokens 1024
+```
+
+You can also compare a local checkpoint against a Hugging Face model id:
+```bash
+python interactive_prompt.py \
+  exp/Qwen/Qwen3-4B-Instruct-2507/polar-bee-16/checkpoint-70323 \
+  --hf-model-id Qwen/Qwen3-4B-Instruct-2507 \
+  --label checkpoint \
+  --label base
+```
+
+Use `:multi` inside the session for multi-line prompts, and `:quit` to exit.

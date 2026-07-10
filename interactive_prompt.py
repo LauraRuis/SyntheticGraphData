@@ -24,7 +24,7 @@ MODEL_DIR_MARKERS = (
 @dataclass
 class LoadedModel:
     label: str
-    path: Path
+    model_ref: str
     tokenizer: object
     llm: object
     raw_prompt: bool
@@ -103,16 +103,25 @@ def _discover_checkpoint_dirs(checkpoint_dir: Path) -> list[Path]:
     )
 
 
-def resolve_checkpoint_paths(args: argparse.Namespace) -> list[Path]:
+def _default_label(model_ref: str) -> str:
+    path = Path(model_ref)
+    if path.exists():
+        return path.name
+    return model_ref
+
+
+def resolve_model_refs(args: argparse.Namespace) -> list[str]:
     supplied = list(args.checkpoints)
     supplied.extend(args.checkpoint or [])
+    hf_model_ids = args.hf_model_id or []
 
     checkpoint_dir = _path_from_user(args.checkpoint_dir) if args.checkpoint_dir else None
 
-    if not supplied:
+    if not supplied and not hf_model_ids:
         if checkpoint_dir is None:
             raise ValueError(
-                "Pass one or two checkpoint paths, or pass --checkpoint-dir."
+                "Pass one or two checkpoint paths, --hf-model-id values, "
+                "or pass --checkpoint-dir."
             )
         resolved = _discover_checkpoint_dirs(checkpoint_dir)
         if len(resolved) > 2:
@@ -122,26 +131,28 @@ def resolve_checkpoint_paths(args: argparse.Namespace) -> list[Path]:
                 f"Pass the one or two you want with -c/--checkpoint. "
                 f"First matches: {names}"
             )
+        model_refs = [str(path) for path in resolved]
     else:
-        resolved = []
+        model_refs = []
         for value in supplied:
             path = _path_from_user(value)
             if checkpoint_dir is not None and not path.is_absolute():
                 path = checkpoint_dir / path
-            resolved.append(path)
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"Missing checkpoint path: {path}. "
+                    "For Hugging Face Hub models, pass --hf-model-id instead."
+                )
+            if not path.is_dir():
+                raise NotADirectoryError(f"Checkpoint path must be a directory: {path}")
+            model_refs.append(str(path))
 
-    if not 1 <= len(resolved) <= 2:
-        raise ValueError(f"Expected one or two checkpoints, got {len(resolved)}.")
+        model_refs.extend(hf_model_ids)
 
-    missing = [str(path) for path in resolved if not path.exists()]
-    if missing:
-        raise FileNotFoundError("Missing checkpoint path(s): " + ", ".join(missing))
+    if not 1 <= len(model_refs) <= 2:
+        raise ValueError(f"Expected one or two models, got {len(model_refs)}.")
 
-    not_dirs = [str(path) for path in resolved if not path.is_dir()]
-    if not_dirs:
-        raise NotADirectoryError("Checkpoint path(s) must be directories: " + ", ".join(not_dirs))
-
-    return resolved
+    return model_refs
 
 
 def build_sampling_params(args: argparse.Namespace) -> object:
@@ -160,16 +171,16 @@ def build_sampling_params(args: argparse.Namespace) -> object:
     return SamplingParams(**kwargs)
 
 
-def load_models(args: argparse.Namespace, checkpoint_paths: Sequence[Path]) -> list[LoadedModel]:
+def load_models(args: argparse.Namespace, model_refs: Sequence[str]) -> list[LoadedModel]:
     from transformers import AutoTokenizer
     from vllm import LLM
 
     labels = args.label or []
-    if labels and len(labels) != len(checkpoint_paths):
-        raise ValueError("Pass exactly one --label per checkpoint, or omit labels.")
+    if labels and len(labels) != len(model_refs):
+        raise ValueError("Pass exactly one --label per model, or omit labels.")
 
     gpu_memory_utilization = args.gpu_memory_utilization
-    if gpu_memory_utilization is None and len(checkpoint_paths) == 2:
+    if gpu_memory_utilization is None and len(model_refs) == 2:
         gpu_memory_utilization = 0.45
         print(
             "Loading two models with gpu_memory_utilization=0.45 each. "
@@ -177,19 +188,19 @@ def load_models(args: argparse.Namespace, checkpoint_paths: Sequence[Path]) -> l
         )
 
     models = []
-    for index, checkpoint_path in enumerate(checkpoint_paths):
-        label = labels[index] if labels else checkpoint_path.name
-        tokenizer_path = _path_from_user(args.tokenizer) if args.tokenizer else checkpoint_path
-        print(f"Loading {label}: {checkpoint_path}", flush=True)
+    for index, model_ref in enumerate(model_refs):
+        label = labels[index] if labels else _default_label(model_ref)
+        tokenizer_ref = str(_path_from_user(args.tokenizer)) if args.tokenizer else model_ref
+        print(f"Loading {label}: {model_ref}", flush=True)
 
         tokenizer = AutoTokenizer.from_pretrained(
-            str(tokenizer_path),
+            tokenizer_ref,
             fix_mistral_regex=True,
             trust_remote_code=args.trust_remote_code,
         )
 
         llm_kwargs = {
-            "model": str(checkpoint_path),
+            "model": model_ref,
             "tensor_parallel_size": args.tensor_parallel_size,
             "pipeline_parallel_size": args.pipeline_parallel_size,
             "max_num_seqs": args.max_num_seqs,
@@ -203,7 +214,7 @@ def load_models(args: argparse.Namespace, checkpoint_paths: Sequence[Path]) -> l
         models.append(
             LoadedModel(
                 label=label,
-                path=checkpoint_path,
+                model_ref=model_ref,
                 tokenizer=tokenizer,
                 llm=llm,
                 raw_prompt=args.raw_prompt,
@@ -269,7 +280,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Start an interactive comparison session for one or two model "
-            "checkpoints."
+            "checkpoints or Hugging Face model IDs."
         )
     )
     parser.add_argument(
@@ -293,9 +304,14 @@ def parse_args() -> argparse.Namespace:
         help="Checkpoint name/path. Can be passed once or twice.",
     )
     parser.add_argument(
+        "--hf-model-id",
+        action="append",
+        help="Hugging Face model id to load with vLLM. Can be passed once or twice.",
+    )
+    parser.add_argument(
         "--label",
         action="append",
-        help="Display label for a checkpoint. Pass once per checkpoint.",
+        help="Display label for a model. Pass once per loaded model.",
     )
     parser.add_argument(
         "--tokenizer",
@@ -328,9 +344,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     try:
-        checkpoint_paths = resolve_checkpoint_paths(args)
+        model_refs = resolve_model_refs(args)
         sampling_params = build_sampling_params(args)
-        models = load_models(args, checkpoint_paths)
+        models = load_models(args, model_refs)
         run_interactive_loop(models, sampling_params)
     except KeyboardInterrupt:
         print()
