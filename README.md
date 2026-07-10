@@ -75,6 +75,8 @@ To compare one or two checkpoints interactively:
 ```bash
 python interactive_prompt.py exp/Qwen/Qwen3-4B-Instruct-2507/polar-bee-16/checkpoint-70323
 
+python interactive_prompt.py --hf-model-id Qwen/Qwen3-4B-Instruct-2507
+
 python interactive_prompt.py \
   --checkpoint-dir exp/Qwen/Qwen3-4B-Instruct-2507/polar-bee-16 \
   --checkpoint checkpoint-60000 \

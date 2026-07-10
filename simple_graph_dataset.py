@@ -179,6 +179,7 @@ class SimpleGraphDataset:
         val_ratio: float = 0.1,
         test_ratio: float = 0.1,
         heldout_scope: str = "nodes",
+        per_component_data: bool = False,
         seed: int = 0,
     ):
         self.num_graphs = num_graphs
@@ -218,6 +219,7 @@ class SimpleGraphDataset:
         self.val_ratio = val_ratio
         self.test_ratio = test_ratio
         self.heldout_scope = heldout_scope
+        self.per_component_data = per_component_data
         self.seed = seed
         self.rng = random.Random(seed)
 
@@ -269,6 +271,7 @@ class SimpleGraphDataset:
                 else:
                     rules[entity] = "AND"
 
+            component_by_entity = self.weak_component_ids(entities, parents, children)
             self.graphs.append(
                 {
                     "graph_idx": graph_idx,
@@ -278,6 +281,7 @@ class SimpleGraphDataset:
                     "children": children,
                     "parents": parents,
                     "rules": rules,
+                    "component_by_entity": component_by_entity,
                 }
             )
 
@@ -358,6 +362,31 @@ class SimpleGraphDataset:
     # ------------------------------------------------------------------
     # Graph reasoning helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def weak_component_ids(
+        entities: list[str],
+        parents: dict[str, set[str]],
+        children: dict[str, set[str]],
+    ) -> dict[str, int]:
+        """Map each entity to its weakly connected component."""
+        remaining = set(entities)
+        component_by_entity = {}
+        component_idx = 0
+        while remaining:
+            start = min(remaining)
+            remaining.remove(start)
+            stack = [start]
+            while stack:
+                entity = stack.pop()
+                component_by_entity[entity] = component_idx
+                neighbours = parents[entity] | children[entity]
+                for neighbour in sorted(neighbours):
+                    if neighbour in remaining:
+                        remaining.remove(neighbour)
+                        stack.append(neighbour)
+            component_idx += 1
+        return component_by_entity
 
     def ancestors(self, graph: dict, entity: str) -> set[str]:
         """All nodes with a directed path into entity."""
@@ -458,11 +487,19 @@ class SimpleGraphDataset:
             ]
         return prompts[: self.num_observation_templates]
 
-    def observation_specs(self, entities: list[str]) -> list[tuple[str, list[str]]]:
+    def observation_specs(self, graph: dict) -> list[tuple[str, list[str]]]:
         """All possible query/observation specs for one world."""
         specs = []
+        entities = graph["entities"]
         for query_entity in entities:
             possible_observed = [e for e in entities if e != query_entity]
+            if self.per_component_data:
+                query_component = graph["component_by_entity"][query_entity]
+                possible_observed = [
+                    e
+                    for e in possible_observed
+                    if graph["component_by_entity"][e] == query_component
+                ]
             max_size = min(self.max_obs_size, len(possible_observed))
             for obs_size in range(1, max_size + 1):
                 for observed_entities_tuple in combinations(possible_observed, obs_size):
@@ -482,8 +519,7 @@ class SimpleGraphDataset:
     def add_observation_examples(self) -> None:
         """Make training examples from sampled worlds."""
         for graph in self.graphs:
-            entities = graph["entities"]
-            specs = self.observation_specs(entities)
+            specs = self.observation_specs(graph)
             for _world_idx in range(self.num_worlds):
                 world = self.sample_world(graph)
                 for query_entity, observed_entities in self.sample_observation_specs(specs):
@@ -614,6 +650,12 @@ class SimpleGraphDataset:
             for first in graph["entities"]:
                 for second in graph["entities"]:
                     if first != second:
+                        if (
+                            self.per_component_data
+                            and graph["component_by_entity"][first]
+                            != graph["component_by_entity"][second]
+                        ):
+                            continue
                         self.add_pair_explanation(graph, first, second)
 
     def generate(self) -> list[dict]:
@@ -780,6 +822,7 @@ class SimpleGraphDataset:
             "num_copies_explanations": self.num_copies_explanations,
             "add_instruction_datapoints": self.add_instruction_datapoints,
             "heldout_scope": self.heldout_scope,
+            "per_component_data": self.per_component_data,
             "split_counts": {split: len(rows) for split, rows in by_split.items()},
             "kind_counts": dict(Counter(row["kind"] for row in self.examples)),
             "explanation_split_by_entity": self.entity_to_explanation_split,
@@ -1085,6 +1128,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-ratio", type=float, default=0.1)
     parser.add_argument("--test-ratio", type=float, default=0.1)
     parser.add_argument("--heldout-scope", choices=["graphs", "nodes"], default="nodes")
+    parser.add_argument(
+        "--per-component-data",
+        action="store_true",
+        help=(
+            "Only create observation and relationship-explanation datapoints "
+            "whose mentioned nodes are all in the same weakly connected component."
+        ),
+    )
     parser.add_argument("--visualize", action="store_true")
     return parser.parse_args()
 
@@ -1109,6 +1160,7 @@ def main() -> None:
         val_ratio=args.val_ratio,
         test_ratio=args.test_ratio,
         heldout_scope=args.heldout_scope,
+        per_component_data=args.per_component_data,
         seed=args.seed,
     )
     dataset.generate()
