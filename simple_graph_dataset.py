@@ -173,6 +173,7 @@ class SimpleGraphDataset:
         num_observation_templates: int = 10,
         num_explanation_templates: int = 10,
         max_observations: int | None = None,
+        max_observations_per_component_probability_bin: int | None = None,
         max_explanations: int | None = None,
         num_copies_explanations: int = 4,
         add_instruction_datapoints: int = 2500,
@@ -196,9 +197,27 @@ class SimpleGraphDataset:
         self.max_obs_size = max_obs_size
         self.num_observation_templates = num_observation_templates
         self.num_explanation_templates = num_explanation_templates
+        if (
+            max_observations_per_component_probability_bin is not None
+            and not per_component_data
+        ):
+            raise ValueError(
+                "max_observations_per_component_probability_bin requires "
+                "per_component_data=True. Pass --per-component-data when using "
+                "--max-observations-per-component-probability-bin."
+            )
         if max_observations is not None and max_observations < 0:
             raise ValueError(
                 f"max_observations must be non-negative or None, got {max_observations}"
+            )
+        if (
+            max_observations_per_component_probability_bin is not None
+            and max_observations_per_component_probability_bin < 0
+        ):
+            raise ValueError(
+                "max_observations_per_component_probability_bin must be "
+                "non-negative or None, got "
+                f"{max_observations_per_component_probability_bin}"
             )
         if max_explanations is not None and max_explanations < 0:
             raise ValueError(
@@ -213,6 +232,9 @@ class SimpleGraphDataset:
                 f"add_instruction_datapoints must be non-negative, got {add_instruction_datapoints}"
             )
         self.max_observations = max_observations
+        self.max_observations_per_component_probability_bin = (
+            max_observations_per_component_probability_bin
+        )
         self.max_explanations = max_explanations
         self.num_copies_explanations = num_copies_explanations
         self.add_instruction_datapoints = add_instruction_datapoints
@@ -256,11 +278,30 @@ class SimpleGraphDataset:
 
             children = {entity: set() for entity in entities}
             parents = {entity: set() for entity in entities}
+            component_parent = {entity: entity for entity in entities}
+
+            def find_component(entity: str) -> str:
+                while component_parent[entity] != entity:
+                    component_parent[entity] = component_parent[component_parent[entity]]
+                    entity = component_parent[entity]
+                return entity
+
+            def union_components(first: str, second: str) -> None:
+                first_root = find_component(first)
+                second_root = find_component(second)
+                if first_root == second_root:
+                    return
+                if first_root < second_root:
+                    component_parent[second_root] = first_root
+                else:
+                    component_parent[first_root] = second_root
+
             for i, parent in enumerate(order):
                 for child in order[i + 1 :]:
                     if self.rng.random() < self.edge_prob:
                         children[parent].add(child)
                         parents[child].add(parent)
+                        union_components(parent, child)
 
             rules = {}
             for entity in entities:
@@ -271,7 +312,14 @@ class SimpleGraphDataset:
                 else:
                     rules[entity] = "AND"
 
-            component_by_entity = self.weak_component_ids(entities, parents, children)
+            component_ids = {}
+            component_by_entity = {}
+            for entity in sorted(entities):
+                root = find_component(entity)
+                if root not in component_ids:
+                    component_ids[root] = len(component_ids)
+                component_by_entity[entity] = component_ids[root]
+
             self.graphs.append(
                 {
                     "graph_idx": graph_idx,
@@ -362,31 +410,6 @@ class SimpleGraphDataset:
     # ------------------------------------------------------------------
     # Graph reasoning helpers
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def weak_component_ids(
-        entities: list[str],
-        parents: dict[str, set[str]],
-        children: dict[str, set[str]],
-    ) -> dict[str, int]:
-        """Map each entity to its weakly connected component."""
-        remaining = set(entities)
-        component_by_entity = {}
-        component_idx = 0
-        while remaining:
-            start = min(remaining)
-            remaining.remove(start)
-            stack = [start]
-            while stack:
-                entity = stack.pop()
-                component_by_entity[entity] = component_idx
-                neighbours = parents[entity] | children[entity]
-                for neighbour in sorted(neighbours):
-                    if neighbour in remaining:
-                        remaining.remove(neighbour)
-                        stack.append(neighbour)
-            component_idx += 1
-        return component_by_entity
 
     def ancestors(self, graph: dict, entity: str) -> set[str]:
         """All nodes with a directed path into entity."""
@@ -677,6 +700,10 @@ class SimpleGraphDataset:
         observations = [row for row in self.examples if row["kind"] == "observation"]
         explanations = [row for row in self.examples if row["kind"] == "explanation"]
 
+        observations = self.cap_observation_rows_by_component_probability_bin(
+            observations,
+            self.max_observations_per_component_probability_bin,
+        )
         observations = self.cap_observation_rows_by_type(
             observations,
             self.max_observations,
@@ -688,6 +715,71 @@ class SimpleGraphDataset:
         )
 
         self.examples = observations + explanations
+
+    @staticmethod
+    def observation_condition_key(row: dict) -> tuple:
+        """Key for P(query value | observed values)."""
+        observed_items = tuple(zip(row["observed_entities"], row["observed_values"]))
+        return (row["graph_idx"], row["query_entity"], observed_items)
+
+    @staticmethod
+    def observation_value_key(row: dict) -> tuple:
+        """Key for a specific query value under an observation condition."""
+        return (*SimpleGraphDataset.observation_condition_key(row), row["answer"])
+
+    @staticmethod
+    def observed_probability_bin(
+        row: dict,
+        condition_counts: Counter,
+        value_counts: Counter,
+    ) -> int | str:
+        condition_key = SimpleGraphDataset.observation_condition_key(row)
+        value_key = SimpleGraphDataset.observation_value_key(row)
+        observation_count = condition_counts[condition_key]
+        if observation_count <= 0:
+            return "unobserved"
+        observed_probability = value_counts[value_key] / observation_count
+        return min(int(observed_probability * 10), 9)
+
+    def cap_observation_rows_by_component_probability_bin(
+        self,
+        rows: list[dict],
+        cap: int | None,
+    ) -> list[dict]:
+        """Cap train rows per graph component and observed-probability bin."""
+        if cap is None:
+            return rows
+
+        train_rows = [row for row in rows if row["split"] == "train"]
+        passthrough_rows = [row for row in rows if row["split"] != "train"]
+
+        condition_counts = Counter()
+        value_counts = Counter()
+        for row in train_rows:
+            condition_counts[self.observation_condition_key(row)] += 1
+            value_counts[self.observation_value_key(row)] += 1
+
+        shuffled = list(train_rows)
+        self.rng.shuffle(shuffled)
+        bucket_counts = Counter()
+        kept = []
+        for row in shuffled:
+            graph = self.graphs[row["graph_idx"]]
+            component_idx = graph["component_by_entity"][row["query_entity"]]
+            probability_bin = self.observed_probability_bin(
+                row,
+                condition_counts,
+                value_counts,
+            )
+            bucket_key = (
+                row["graph_idx"],
+                component_idx,
+                probability_bin,
+            )
+            if bucket_counts[bucket_key] < cap:
+                kept.append(row)
+                bucket_counts[bucket_key] += 1
+        return kept + passthrough_rows
 
     def cap_observation_rows_by_type(self, rows: list[dict], cap: int | None) -> list[dict]:
         """Cap observation rows so every listed inference type stays under cap."""
@@ -817,6 +909,12 @@ class SimpleGraphDataset:
             "max_obs_size": self.max_obs_size,
             "max_observations": self.max_observations,
             "max_observations_unit": "per split and inference_type",
+            "max_observations_per_component_probability_bin": (
+                self.max_observations_per_component_probability_bin
+            ),
+            "max_observations_per_component_probability_bin_unit": (
+                "per train graph_idx, query component_idx, observed_probability_bin"
+            ),
             "max_explanations": self.max_explanations,
             "max_explanations_unit": "per split and explanation_type before train copies",
             "num_copies_explanations": self.num_copies_explanations,
@@ -1108,6 +1206,16 @@ def parse_args() -> argparse.Namespace:
         help="Maximum observation rows per split and inference type.",
     )
     parser.add_argument(
+        "--max-observations-per-component-probability-bin",
+        type=int,
+        default=None,
+        help=(
+            "Maximum train observation rows per graph component and "
+            "observed-probability decile. The component is the query entity's "
+            "weakly connected component."
+        ),
+    )
+    parser.add_argument(
         "--max-explanations",
         type=int,
         default=None,
@@ -1137,7 +1245,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--visualize", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if (
+        args.max_observations_per_component_probability_bin is not None
+        and not args.per_component_data
+    ):
+        parser.error(
+            "--max-observations-per-component-probability-bin requires "
+            "--per-component-data"
+        )
+    return args
 
 
 def main() -> None:
@@ -1154,6 +1271,9 @@ def main() -> None:
         num_observation_templates=args.num_observation_templates,
         num_explanation_templates=args.num_explanation_templates,
         max_observations=args.max_observations,
+        max_observations_per_component_probability_bin=(
+            args.max_observations_per_component_probability_bin
+        ),
         max_explanations=args.max_explanations,
         num_copies_explanations=args.num_copies_explanations,
         add_instruction_datapoints=args.add_instruction_datapoints,
