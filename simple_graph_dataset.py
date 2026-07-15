@@ -1114,6 +1114,29 @@ def explanation_type_counts(rows: list[dict]) -> Counter:
     )
 
 
+def relationship_answer_type(answer: str) -> str:
+    """Classify relationship explanation ground-truth text."""
+    if " is an ancestor of " in answer:
+        return "ancestor"
+    if " is a descendant of " in answer:
+        return "descendant"
+    if " are independent" in answer:
+        return "independent"
+    return "unknown"
+
+
+def relationship_ground_truth_counts(rows: list[dict]) -> Counter:
+    """Count relationship explanation labels from their ground-truth answers."""
+    counts = Counter()
+    for row in rows:
+        if row["kind"] != "explanation":
+            continue
+        if row["explanation_type"] != "relationship":
+            continue
+        counts[relationship_answer_type(row["answer"])] += 1
+    return counts
+
+
 def find_example(rows: list[dict], kind: str, type_name: str) -> dict | None:
     """Find one row of the requested kind/type."""
     for row in rows:
@@ -1155,6 +1178,15 @@ def print_breakdowns_and_examples(examples: list[dict], output_dir: Path) -> Non
         )
         print(f"    observation inference types: {format_counts(observation_type_counts(rows))}")
         print(f"    explanation types: {format_counts(explanation_type_counts(rows))}")
+        print(
+            "    relationship ground truths: "
+            f"{format_counts(relationship_ground_truth_counts(rows))}"
+        )
+
+    print(
+        "\nRelationship ground truths overall: "
+        f"{format_counts(relationship_ground_truth_counts(examples))}"
+    )
 
     print("\nExamples by split/type")
     for split in ("train", "val", "test"):
